@@ -5,9 +5,8 @@ import os
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-change-this')
+app.secret_key = 'my-secret-key-123'  # Simple key for local testing
 
-# Login required decorator
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -16,7 +15,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Home page - Display all users
 @app.route('/')
 @login_required
 def index():
@@ -27,18 +25,19 @@ def index():
         users = cur.fetchall()
         cur.close()
         conn.close()
-        # FIX: render dashboard.html instead of index.html
         return render_template('dashboard.html', users=users)
     except Exception as e:
         flash(f"Error: {str(e)}", 'error')
         return redirect(url_for('login'))
 
-# Login page
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
+        
+        # DEBUG: Print to terminal
+        print(f"\n🔐 LOGIN DEBUG: email={email}, password_len={len(password)}")
 
         try:
             conn = get_db_connection()
@@ -47,38 +46,47 @@ def login():
             user = cur.fetchone()
             cur.close()
             conn.close()
-
+            
+            print(f"🔐 User found: {user is not None}")
+            
             if user and len(user) >= 5:
-                stored_password = user[4]  # password is at index 4
+                stored_password = user[4]  # ✅ PASSWORD IS AT INDEX 4
+                print(f"🔐 Stored password preview: {str(stored_password)[:40]}...")
                 
-                password_valid = False
                 if stored_password:
                     try:
-                        password_valid = check_password_hash(stored_password, password)
-                    except:
-                        password_valid = (stored_password == password)
+                        is_match = check_password_hash(stored_password, password)
+                        print(f"🔐 Password match result: {is_match}")
+                    except Exception as e:
+                        print(f"🔐 Hash error: {e}")
+                        is_match = False
+                else:
+                    is_match = False
                 
-                if password_valid:
+                if is_match:
+                    print(f"✅ LOGIN SUCCESS")
                     session['user_id'] = user[0]
                     session['user_name'] = user[1]
                     session['user_email'] = user[2]
                     flash('Login successful!', 'success')
                     return redirect(url_for('index'))
             
+            print(f"❌ LOGIN FAILED")
             flash('Invalid email or password!', 'error')
-
+            
         except Exception as e:
+            print(f"💥 Login exception: {e}")
             flash(f"Error: {str(e)}", 'error')
 
     return render_template('login.html')
-# Register page
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        name = request.form.get('name')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        confirm_password = request.form.get('confirm_password')
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        confirm_password = request.form.get('confirm_password', '')
 
         if not name or not email or not password:
             flash('All fields are required!', 'error')
@@ -95,104 +103,85 @@ def register():
         try:
             conn = get_db_connection()
             cur = conn.cursor()
-
+            
             cur.execute('SELECT id FROM users WHERE email = %s', (email,))
             if cur.fetchone():
-                flash('Email already registered! Please login.', 'error')
+                flash('Email already registered!', 'error')
                 cur.close()
                 conn.close()
                 return render_template('register.html')
 
             hashed_password = generate_password_hash(password)
+            print(f"\n🔐 REGISTER DEBUG: hashing password for {email}")
 
             cur.execute("""
                 INSERT INTO users (name, email, password)
                 VALUES (%s, %s, %s)
             """, (name, email, hashed_password))
-
+            
             conn.commit()
             cur.close()
             conn.close()
-
+            
+            print(f"✅ Registration successful")
             flash('Registration successful! Please login.', 'success')
             return redirect(url_for('login'))
-
+            
         except Exception as e:
-            flash(f"Error creating account: {str(e)}", 'error')
+            print(f"❌ Registration error: {e}")
+            flash(f"Error: {str(e)}", 'error')
 
     return render_template('register.html')
 
-# Logout
 @app.route('/logout')
 def logout():
     session.clear()
-    flash('You have been logged out.', 'success')
+    flash('Logged out.', 'success')
     return redirect(url_for('login'))
 
-# CREATE - Add new user
 @app.route('/create', methods=['GET', 'POST'])
 @login_required
 def create():
     if request.method == 'POST':
         name = request.form.get('name')
         email = request.form.get('email')
-
+        
         if not name or not email:
-            flash('Name and Email are required!', 'error')
+            flash('Name and Email required!', 'error')
             return render_template('create.html')
-
+        
         try:
             conn = get_db_connection()
             cur = conn.cursor()
-
-            cur.execute('SELECT id FROM users WHERE email = %s', (email,))
-            if cur.fetchone():
-                flash('Email already exists!', 'error')
-                cur.close()
-                conn.close()
-                return render_template('create.html')
-
-            cur.execute(
-                'INSERT INTO users (name, email) VALUES (%s, %s)',
-                (name, email)
-            )
+            cur.execute('INSERT INTO users (name, email) VALUES (%s, %s)', (name, email))
             conn.commit()
             cur.close()
             conn.close()
-            flash('User created successfully!', 'success')
+            flash('User created!', 'success')
             return redirect(url_for('index'))
         except Exception as e:
-            flash(f"Error creating user: {str(e)}", 'error')
-
+            flash(f"Error: {str(e)}", 'error')
+    
     return render_template('create.html')
 
-# UPDATE - Edit user
 @app.route('/update/<int:id>', methods=['GET', 'POST'])
 @login_required
 def update(id):
     if request.method == 'POST':
         name = request.form.get('name')
         email = request.form.get('email')
-
-        if not name or not email:
-            flash('Name and Email are required!', 'error')
-            return render_template('update.html', user=(id, name, email))
-
         try:
             conn = get_db_connection()
             cur = conn.cursor()
-            cur.execute(
-                'UPDATE users SET name = %s, email = %s WHERE id = %s',
-                (name, email, id)
-            )
+            cur.execute('UPDATE users SET name=%s, email=%s WHERE id=%s', (name, email, id))
             conn.commit()
             cur.close()
             conn.close()
-            flash('User updated successfully!', 'success')
+            flash('User updated!', 'success')
             return redirect(url_for('index'))
         except Exception as e:
-            flash(f"Error updating user: {str(e)}", 'error')
-
+            flash(f"Error: {str(e)}", 'error')
+    
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -200,17 +189,10 @@ def update(id):
         user = cur.fetchone()
         cur.close()
         conn.close()
-
-        if not user:
-            flash('User not found!', 'error')
-            return redirect(url_for('index'))
-
         return render_template('update.html', user=user)
-    except Exception as e:
-        flash(f"Error: {str(e)}", 'error')
+    except:
         return redirect(url_for('index'))
 
-# DELETE - Remove user
 @app.route('/delete/<int:id>', methods=['POST'])
 @login_required
 def delete(id):
@@ -221,10 +203,9 @@ def delete(id):
         conn.commit()
         cur.close()
         conn.close()
-        flash('User deleted successfully!', 'success')
+        flash('User deleted!', 'success')
     except Exception as e:
-        flash(f"Error deleting user: {str(e)}", 'error')
-
+        flash(f"Error: {str(e)}", 'error')
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
