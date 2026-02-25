@@ -37,8 +37,8 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
 
         try:
             conn = get_db_connection()
@@ -48,30 +48,29 @@ def login():
             cur.close()
             conn.close()
 
-            if user:
-                # Try hashed password check first, fall back to plain text (for seeded admin)
-                stored_password = user[3]
-                try:
-                    password_valid = check_password_hash(stored_password, password)
-                except Exception:
-                    password_valid = (stored_password == password)
-
+            if user and len(user) >= 5:
+                stored_password = user[4]  # password is at index 4
+                
+                password_valid = False
+                if stored_password:
+                    try:
+                        password_valid = check_password_hash(stored_password, password)
+                    except:
+                        password_valid = (stored_password == password)
+                
                 if password_valid:
                     session['user_id'] = user[0]
                     session['user_name'] = user[1]
                     session['user_email'] = user[2]
                     flash('Login successful!', 'success')
                     return redirect(url_for('index'))
-                else:
-                    flash('Invalid email or password!', 'error')
-            else:
-                flash('Invalid email or password!', 'error')
+            
+            flash('Invalid email or password!', 'error')
 
         except Exception as e:
-            flash(f"Login error: {str(e)}", 'error')
+            flash(f"Error: {str(e)}", 'error')
 
     return render_template('login.html')
-
 # Register page
 @app.route('/register', methods=['GET', 'POST'])
 def register():
